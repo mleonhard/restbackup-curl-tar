@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# Copyright (C) 2011 Rest Backup LLC
+#
+# Use of this software is subject to the RestBackup.com Terms of Use,
+# http://www.restbackup.com/terms
+#
+# Version 2.0
+# Author: Michael Leonhard
+
+function emit_description {
+    cat <<EOF
+Restbackup-curl-tar is a command-line tool for performing incremental backups to
+RestBackup(tm) and restoring from any point in time.  Requires curl and tar.
+Get your backup account at http://www.restbackup.com/
+
+The restbackup-python package includes an improved version of this tool called
+restbackup-tar, which can do encryption.
+
+EOF
+}
+
+function emit_usage {
+    cat <<EOF
+Usage: restbackup-curl-tar [OPTIONS] COMMAND [args]
+
+Commands:
+ --full FILE1 FILE2 ...        Perform a full backup
+ --incremental FILE1 ...       Perform an incremental backup
+ --list                        List backup archives
+ --restore ARCHIVE [FILE1 ...] Restore files from archive
+ --help                        Show this message
+ --example                     Show example usage
+
+Options:
+ -u ACCESS_URL       a RestBackup(tm) backup account access url such as
+                     https://Z2J3BB:R0GaTKS0vM3l3FgY@us.restbackup.com/
+ -b ACCESS_URL_FILE  file with backup account access url, default
+                     ~/.restbackup-backup-api-access-url
+ -n NAME             name for the set of backups, eg. leonhard-email, git-repos.
+                     Default: backup
+ -s SNAPSHOT_FILE    Tar incremental snapshot file, default
+                     ~/.restbackup-curl-tar/NAME.snapshot
+EOF
+}
+
+function emit_example {
+    cat <<EOF
+Restbackup-curl-tar Example Usage
+
+Setup:
+ $ echo https://WPJXX3:INzIsdEE77vZgih7@us.restbackup.com/ >~/.restbackup-backup-api-access-url
+ $ chmod 600 ~/.restbackup-backup-api-access-url
+ $ mkdir data
+ $ echo "initial data" >data/file1
+
+Full Backup:
+ $ restbackup-curl-tar -n data -s data.snapshot --full data/
+ Performing full backup to 'data-20110620T153328Z-full.tar.gz'
+ Writing archive to temporary file /tmp/fileDBJwoW.restbackup-curl-tar.tar.gz
+ Uploading to https://us.restbackup.com/data-20110620T153328Z-full.tar.gz
+ Removing temporary file
+ Done.
+
+Incremental Backups:
+ $ echo "new data" >data/file2
+ $ restbackup-curl-tar -n data -s data.snapshot --incremental data/
+ Performing incremental backup to 'data-20110620T153328Z-inc1.tar.gz'
+ Writing archive to temporary file /tmp/filelUxTkH.restbackup-curl-tar.tar.gz
+ Uploading to https://us.restbackup.com/data-20110620T153328Z-inc1.tar.gz
+ Removing temporary file
+ Done.
+ $ echo "a modification" >>data/file1
+ $ echo "more new data" >data/file3
+ $ restbackup-curl-tar -n data -s data.snapshot --incremental data/
+ ...
+
+Restore:
+ $ restbackup-curl-tar --list
+ 2011-06-20T15:33:29Z   183     /data-20110620T153328Z-full.tar.gz
+ 2011-06-20T15:34:00Z   187     /data-20110620T153328Z-inc1.tar.gz
+ 2011-06-20T15:34:31Z   241     /data-20110620T153328Z-inc2.tar.gz
+ $ restbackup-curl-tar --restore /data-20110620T153328Z
+ Restoring to data-20110620T153328Z/
+ Retrieving https://us.restbackup.com/data-20110620T153328Z-full.tar.gz
+ data/
+ data/file1
+ Retrieving https://us.restbackup.com/data-20110620T153328Z-inc1.tar.gz
+ data/
+ data/file2
+ Retrieving https://us.restbackup.com/data-20110620T153328Z-inc2.tar.gz
+ data/
+ data/file1
+ data/file3
+ Done.
+ $ ls data-20110620T153328Z/data/
+ file1  file2  file3
+ $ cat data-20110620T153328Z/data/file1
+ initial data
+ a modification
+EOF
+}
+
+set -e
+
+# Default values
+URL=
+URL_FILE=~/.restbackup-backup-api-access-url
+NAME=backup
+SNAPSHOT_FILE=
+COMMAND=
+
+# No arguments
+if [[ $# == 0 ]]; then
+    emit_description
+    emit_usage
+    exit 0
+fi
+
+# Parse arguments
+while (( "$#" )); do
+    case $1 in
+	--help)
+	    emit_description
+	    emit_usage
+	    exit 0
+	    ;;
+	--example)
+	    emit_example
+	    exit 0
+	    ;;
+	"-u")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for -u option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    URL=$(echo $2 |head -n 1)
+	    shift
+	    ;;
+	"-b")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for -b option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    URL_FILE=$(echo $2 |head -n 1)
+	    shift
+	    ;;
+	"-n")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for -n option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    NAME=$(echo $2 |head -n 1)
+	    shift
+	    ;;
+	"-s")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for -s option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    SNAPSHOT_FILE=$(echo $2 |head -n 1)
+	    shift
+	    ;;
+	"--full")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for --full option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    COMMAND=full
+	    shift
+	    FILES=$@
+	    break
+	    ;;
+	"--incremental")
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for --incremental option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    COMMAND=incremental
+	    shift
+	    FILES=$@
+	    break
+	    ;;
+	"--list")
+	    COMMAND=list
+	    ;;
+	"--restore")
+	    COMMAND=restore
+	    if [ $# -lt 2 ]; then
+		echo "ERROR: missing argument for --restore option" >&2
+		emit_usage >&2
+		exit 1
+	    fi
+	    ARCHIVE=$(echo $2 |head -n 1)
+	    shift
+	    shift
+	    FILES=$@
+	    break
+	    ;;
+	*)
+	    echo "ERROR: unknown argument '$1'" >&2
+	    emit_usage >&2
+	    exit 1
+	    ;;
+    esac
+    shift
+done
+
+# Read url from file
+if ! [[ "$URL" ]]; then
+    URL=$(cat $URL_FILE |head -n 1)
+    if ! [[ "$URL" ]]; then
+	echo "ERROR: unable to read url from file '$URL_FILE'" >&2
+	emit_usage >&2
+	exit 1
+    fi
+fi
+
+# Validate url
+if ! (echo "$URL" |grep -E '^https://\w+:\w+@[-.a-zA-Z0-9]+(:[0-9]+)?/$' >/dev/null); then
+    echo "ERROR: access url is mal-formed '$URL'" >&2
+    emit_usage
+    exit 1
+fi
+USERPASS=$(echo "$URL" |sed -re 'sM^https://(\w+:\w+)@.*$M\1M')
+ENDPOINT=$(echo "$URL" |sed -re 'sM^https://\w+:\w+@(.*)$Mhttps://\1M')
+
+# Validate name
+if ! [[ "$NAME" ]]; then
+    echo "ERROR: invalid name '$NAME'" >&2
+    emit_usage
+    exit 1
+fi
+
+# Default snapshot file
+if ! [[ "$SNAPSHOT_FILE" ]]; then
+    mkdir -p ~/.restbackup-curl-tar
+    SNAPSHOT_FILE=~/.restbackup-curl-tar/$NAME.snapshot
+fi
+
+#echo "URL='$URL'"
+#echo "URL_FILE='$URL_FILE'"
+#echo "NAME='$NAME'"
+#echo "SNAPSHOT_FILE='$SNAPSHOT_FILE'"
+#echo "COMMAND='$COMMAND'"
+#echo "FILES='$FILES'"
+
+if [[ "$COMMAND" == "list" ]]; then
+    curl -sSu "$USERPASS" "$ENDPOINT"
+    exit $?
+elif [[ "$COMMAND" == "full" ]] || [[ "$COMMAND" == "incremental" ]]; then
+    BACKUP_NAME_FILE="$SNAPSHOT_FILE.backupname"
+    LAST_BACKUP_LEVEL_FILE="$SNAPSHOT_FILE.lastbackuplevel"
+    
+    if [[ "$COMMAND" == "full" ]]; then
+	# Full
+	TIMESTAMP=$(date --utc '+%Y%m%dT%H%M%SZ')
+	BACKUP_NAME="$NAME-$TIMESTAMP"
+	ARCHIVE_NAME="$BACKUP_NAME-full.tar.gz"
+	echo "Performing full backup to '$ARCHIVE_NAME'"
+	echo -n "$BACKUP_NAME" >"$BACKUP_NAME_FILE"
+	rm -f "$SNAPSHOT_FILE"
+	LEVEL=0
+    else
+	# Incremental
+	if ! [ -f $BACKUP_NAME_FILE ]; then
+	    echo "ERROR: Cannot find file '$BACKUP_NAME_FILE'. Have you already performed a full backup?" >&2;
+	    exit 1
+	fi
+	BACKUP_NAME=$(cat $BACKUP_NAME_FILE)
+	if ! [ -f $LAST_BACKUP_LEVEL_FILE ]; then
+	    echo "ERROR: Cannot find file '$LAST_BACKUP_LEVEL_FILE'" >&2;
+	    exit 1
+	fi
+	LEVEL=$(cat $LAST_BACKUP_LEVEL_FILE)
+	let "LEVEL = $LEVEL + 1"
+	ARCHIVE_NAME="$BACKUP_NAME-inc$LEVEL.tar.gz"
+	echo "Performing incremental backup to '$ARCHIVE_NAME'"
+    fi
+    
+    TEMPFILE=$(tempfile -s .restbackup-curl-tar.tar.gz)
+    echo "Writing archive to temporary file $TEMPFILE"
+    # See http://www.gnu.org/software/automake/manual/tar/Incremental-Dumps.html
+    tar -czf "$TEMPFILE" -g "$SNAPSHOT_FILE" $FILES
+    
+    FILE_URL="$ENDPOINT$ARCHIVE_NAME"
+    echo "Uploading to $FILE_URL"
+    CURL_OUTPUT=$(curl -isSu "$USERPASS" "$FILE_URL" -T "$TEMPFILE")
+    if ! echo "$CURL_OUTPUT" |grep -E '^HTTP/[.0-9]+ 2[0-9]{2} ' >/dev/null; then
+	echo "$CURL_OUTPUT" >&2
+	exit 1
+    fi
+    
+    echo "$LEVEL" >$LAST_BACKUP_LEVEL_FILE
+    
+    echo "Removing temporary file"
+    rm -f $TEMPFILE
+else
+    # Restore
+    if echo "$ARCHIVE" |grep -E -- '-full(\.tar\.gz)?$' >/dev/null; then
+	MAXLEVEL=0
+    elif echo "$ARCHIVE" |grep -E -- '-inc[0-9]+(\.tar\.gz)?$' >/dev/null; then
+	MAXLEVEL=$(echo "$ARCHIVE" |sed -re 's/^.*-inc([0-9]+)(\.tar\.gz)?$/\1/')
+    else
+	MAXLEVEL=9999
+    fi
+    BACKUP_NAME=$(echo "$ARCHIVE" |sed -re 'sM^/?(.*)$M\1M' |sed -re 'sM(-full|-inc[0-9]+)?(\.tar\.gz)?$MM')
+    RESTORE_DIR=$(echo -n "$BACKUP_NAME" |sed -re 'sM/M#Mg')
+    echo "Restoring to $RESTORE_DIR/"
+    mkdir -p $RESTORE_DIR || exit 1
+    
+    # Download and extract full backup file first
+    FILE_URL=$ENDPOINT$BACKUP_NAME-full.tar.gz
+    echo "Retrieving $FILE_URL"
+    CURL_OUTPUT=$(curl -IsSu $USERPASS "$FILE_URL")
+    if ! echo "$CURL_OUTPUT" |grep -E '^HTTP/1\.. 200 .*' >/dev/null; then
+	echo "$CURL_OUTPUT"
+	exit 1
+    fi
+    if [[ "$FILES" ]]; then
+	curl -sSu $USERPASS "$FILE_URL" |tar -xzvGC "$RESTORE_DIR" $FILES 2>&1 \
+	    |grep -v 'Exiting with failure status due to previous errors' || echo "Ignoring error"
+    else
+	curl -sSu $USERPASS "$FILE_URL" |tar -xzvGC "$RESTORE_DIR"
+    fi
+    
+    # Download and extract each incremental backup
+    LEVEL=0
+    while (("$LEVEL" < "$MAXLEVEL")); do
+	let "LEVEL = $LEVEL + 1"
+	FILE_URL="$ENDPOINT$BACKUP_NAME-inc$LEVEL.tar.gz"
+	CURL_OUTPUT=$(curl -IsSu $USERPASS "$FILE_URL")
+	echo "$CURL_OUTPUT" |grep -E '^HTTP/1\.. 404 .*' >/dev/null && break
+	if ! echo "$CURL_OUTPUT" |grep -E '^HTTP/1\.. 200 .*' >/dev/null; then
+	    echo "$CURL_OUTPUT"
+	    exit 1
+	fi
+	echo "Retrieving $FILE_URL"
+	if [[ "$FILES" ]]; then
+	    curl -sSu $USERPASS "$FILE_URL" |tar -xzvGC "$RESTORE_DIR" $FILES \
+		|grep -v 'Exiting with failure status due to previous errors' || echo "Ignoring error"
+	else
+	    curl -sSu $USERPASS "$FILE_URL" |tar -xzvGC "$RESTORE_DIR"
+	fi
+    done
+fi
+
+echo "Done."
+exit 0
