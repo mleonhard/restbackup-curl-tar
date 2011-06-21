@@ -250,7 +250,11 @@ fi
 #echo "COMMAND='$COMMAND'"
 #echo "FILES='$FILES'"
 
-if [[ "$COMMAND" == "list" ]]; then
+if [[ "$COMMAND" == "" ]]; then
+    echo "ERROR: You must specify a command" >&2
+    emit_usage
+    exit 1
+elif [[ "$COMMAND" == "list" ]]; then
     curl -sSu "$USERPASS" "$ENDPOINT"
     exit $?
 elif [[ "$COMMAND" == "full" ]] || [[ "$COMMAND" == "incremental" ]]; then
@@ -300,8 +304,7 @@ elif [[ "$COMMAND" == "full" ]] || [[ "$COMMAND" == "incremental" ]]; then
     
     echo "Removing temporary file"
     rm -f $TEMPFILE
-else
-    # Restore
+elif [[ "$COMMAND" == "restore" ]]; then
     if echo "$ARCHIVE" |grep -E -- '-full(\.tar\.gz)?$' >/dev/null; then
 	MAXLEVEL=0
     elif echo "$ARCHIVE" |grep -E -- '-inc[0-9]+(\.tar\.gz)?$' >/dev/null; then
@@ -348,6 +351,9 @@ else
 	    curl -sSu $USERPASS "$FILE_URL" |tar -xzvGC "$RESTORE_DIR"
 	fi
     done
+else
+    echo "ERROR: Command '$COMMAND' is not implemented" >&2
+    exit 1
 fi
 
 echo "Done."
